@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mapa de Reportes</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* ── RESET & BASE ── */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  /* Notion-style palette — oscuro */
+  --bg:        #191919;
+  --surface:   #202020;
+  --surface2:  #2a2a2a;
+  --border:    #333333;
+  --text:      #e6e6e6;
+  --muted:     #888;
+  --accent:    #9b59f5;   /* Notion purple */
+
+  /* Categorías — colores Notion */
+  --c-zona:    #F4A261;   /* Zona peatonal — naranja */
+  --c-alum:    #FFD166;   /* Alumbrado — amarillo */
+  --c-terreno: #6BCB77;   /* Terreno baldío — verde */
+  --c-vandalismo: #EF476F;/* Vandalismo — rojo */
+  --c-transporte: #4CC9F0;/* Transporte — azul cielo */
+  --c-otro:    #A8DADC;   /* Otro — teal */
+}
+
+html, body { height:100%; overflow:hidden; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); }
+
+/* ── TOPBAR ── */
+#topbar {
+  height:44px; display:flex; align-items:center; gap:10px; padding:0 14px;
+  background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0;
+}
+.logo { font-size:13px; font-weight:700; color:var(--accent); letter-spacing:.04em; display:flex; align-items:center; gap:6px; }
+.logo svg { opacity:.85; }
+.tsep { width:1px; height:20px; background:var(--border); }
+#csv-btn {
+  font-size:12px; background:var(--surface2); border:1px solid var(--border);
+  color:var(--muted); border-radius:6px; padding:4px 10px; cursor:pointer; transition:all .15s;
+  display:flex; align-items:center; gap:5px;
+}
+#csv-btn:hover { border-color:var(--accent); color:var(--accent); }
+#csv-input { display:none; }
+#stats { margin-left:auto; font-size:12px; color:var(--muted); }
+#stats b { color:var(--accent); }
+
+/* ── GEO BAR ── */
+#geo-bar-wrap {
+  display:none; align-items:center; gap:10px; padding:5px 14px;
+  background:var(--surface); border-bottom:1px solid var(--border); font-size:12px; color:var(--muted); flex-shrink:0;
+}
+#geo-bar-wrap.show { display:flex; }
+.geo-track { flex:1; height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+.geo-fill  { height:100%; background:var(--accent); transition:width .3s; width:0%; }
+
+/* ── LAYOUT ── */
+#main { display:flex; height:calc(100vh - 44px); overflow:hidden; position:relative; }
+
+/* ── SIDEBAR ── */
+#sidebar {
+  width:248px; background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; flex-shrink:0; transition:width .25s; overflow:hidden;
+}
+#sidebar.hide { width:0; border-right:none; }
+#sidebar-inner { width:248px; overflow-y:auto; flex:1; }
+#sidebar-inner::-webkit-scrollbar { width:3px; }
+#sidebar-inner::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+.sec { padding:14px; border-bottom:1px solid var(--border); }
+.sec-title { font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+
+/* ── CAT ROWS ── */
+.cat-row {
+  display:flex; align-items:center; gap:9px; padding:5px 7px;
+  border-radius:6px; cursor:pointer; transition:background .1s; margin-bottom:2px; user-select:none;
+}
+.cat-row:hover { background:var(--surface2); }
+.cat-row.off { opacity:.3; }
+.cat-dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+.cat-name { font-size:12px; color:var(--text); flex:1; line-height:1.3; }
+.cat-n { font-size:11px; color:var(--muted); font-weight:600; min-width:18px; text-align:right; }
+
+/* ── INPUTS ── */
+.field {
+  width:100%; font-size:12px; background:var(--surface2); border:1px solid var(--border);
+  color:var(--text); border-radius:6px; padding:6px 10px; outline:none; transition:border-color .15s;
+}
+.field:focus { border-color:var(--accent); }
+.field::placeholder { color:#555; }
+.cp-row { display:flex; gap:6px; margin-top:7px; }
+.cp-row .field { flex:1; }
+.go-btn {
+  font-size:12px; background:var(--accent)22; border:1px solid var(--accent)55;
+  color:var(--accent); border-radius:6px; padding:6px 10px; cursor:pointer; transition:all .15s; white-space:nowrap;
+}
+.go-btn:hover { background:var(--accent)33; }
+#cp-msg { font-size:11px; color:var(--muted); margin-top:5px; min-height:14px; }
+
+/* ── SIDEBAR TOGGLE ── */
+#sb-toggle {
+  position:absolute; left:0; top:50%; transform:translateY(-50%);
+  z-index:950; background:var(--surface); border:1px solid var(--border); border-left:none;
+  color:var(--muted); padding:10px 5px; cursor:pointer;
+  border-radius:0 6px 6px 0; font-size:14px; line-height:1; transition:color .15s;
+  user-select:none;
+}
+#sb-toggle:hover { color:var(--accent); }
+
+/* ── MAP ── */
+#map-wrap { flex:1; position:relative; overflow:hidden; }
+#map { width:100%; height:100%; }
+.leaflet-container { background:#111; }
+.leaflet-tile { filter:brightness(.82) saturate(.65) hue-rotate(195deg); }
+.leaflet-popup-content-wrapper { padding:0; background:transparent; border:none; box-shadow:none; }
+.leaflet-popup-content { margin:0; line-height:1; }
+.leaflet-popup-tip-container { display:none; }
+.leaflet-popup-close-button { color:#999 !important; top:7px !important; right:9px !important; font-size:17px !important; z-index:10; font-weight:700 !important; }
+.leaflet-control-zoom { border:1px solid var(--border) !important; border-radius:6px !important; overflow:hidden; }
+.leaflet-control-zoom a { background:var(--surface) !important; color:var(--muted) !important; border-bottom:1px solid var(--border) !important; }
+.leaflet-control-zoom a:hover { background:var(--surface2) !important; color:var(--text) !important; }
+.leaflet-control-attribution { background:rgba(25,25,25,.75) !important; color:#555 !important; font-size:9px !important; }
+.leaflet-control-attribution a { color:#777 !important; }
+
+/* ── LEYENDA ── */
+#legend {
+  position:absolute; bottom:26px; right:12px; z-index:900;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  width:200px; box-shadow:0 4px 24px rgba(0,0,0,.5);
+}
+#leg-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 12px; cursor:pointer; user-select:none; border-radius:10px;
+}
+#leg-head:hover { background:var(--surface2); border-radius:10px; }
+#legend.open #leg-head { border-bottom:1px solid var(--border); border-radius:10px 10px 0 0; }
+#leg-title { font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+#leg-arrow { font-size:10px; color:var(--muted); transition:transform .2s; display:inline-block; }
+#legend.open #leg-arrow { transform:rotate(180deg); }
+#leg-body { padding:10px 12px 12px; display:none; }
+#legend.open #leg-body { display:block; }
+
+.leg-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.leg-row:last-child { margin-bottom:0; }
+.leg-dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+.leg-cat { font-size:12px; color:var(--text); flex:1; }
+.leg-n { font-size:11px; color:var(--muted); font-weight:600; }
+.leg-stats { border-top:1px solid var(--border); margin-top:9px; padding-top:9px; }
+.leg-stat { display:flex; justify-content:space-between; font-size:11px; margin-bottom:3px; }
+.leg-stat span:first-child { color:var(--muted); }
+.leg-stat span:last-child { color:var(--accent); font-weight:600; }
+
+/* ── POPUP / HOVER CARD ── */
+.hcard {
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  overflow:hidden; width:260px; box-shadow:0 8px 32px rgba(0,0,0,.6);
+}
+.hcard-img { width:100%; height:50px; display:flex; align-items:center; justify-content:center; font-size:22px; gap:6px; }
+.hcard-body { padding:10px 13px 13px; }
+.hcard-badge {
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
+  padding:3px 9px; border-radius:5px; margin-bottom:7px;
+}
+.hcard-id { font-size:10px; color:var(--muted); margin-bottom:2px; font-family:monospace; }
+.hcard-title { font-size:12px; font-weight:600; color:var(--text); line-height:1.4; margin-bottom:6px; }
+.hcard-rows { display:flex; flex-direction:column; gap:3px; }
+.hcard-row { display:flex; align-items:flex-start; gap:6px; font-size:11px; color:var(--muted); }
+.hcard-row b { color:var(--text); font-weight:500; }
+.hcard-seg { margin-top:7px; padding-top:7px; border-top:1px solid var(--border); }
+.seg-label { font-size:10px; color:var(--muted); margin-bottom:4px; }
+.seg-bar-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; }
+.seg-bar-fill { height:100%; border-radius:3px; transition:width .4s; }
+
+/* ── MARCADOR ── */
+.mpin {
+  width:26px; height:26px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  border:2px solid; box-shadow:0 2px 10px rgba(0,0,0,.5);
+  font-size:12px;
+}
+
+/* ── TOAST ── */
+#toast {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(60px);
+  background:var(--surface2); border:1px solid var(--border); color:var(--text);
+  padding:6px 16px; border-radius:20px; font-size:12px;
+  transition:transform .25s; z-index:9999; pointer-events:none; white-space:nowrap;
+}
+#toast.show { transform:translateX(-50%) translateY(0); }
+
+/* ── DROP ── */
+#drop-ov { display:none; position:fixed; inset:0; background:rgba(15,15,15,.85); z-index:8888; align-items:center; justify-content:center; }
+#drop-ov.show { display:flex; }
+.drop-box { border:2px dashed var(--accent); border-radius:12px; padding:36px 56px; text-align:center; color:var(--accent); font-size:14px; font-weight:600; }
+.drop-box p { font-size:11px; color:var(--muted); margin-top:8px; font-weight:400; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/></svg>
+    Mapa de Reportes
+  </div>
+  <div class="tsep"></div>
+  <button id="csv-btn">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Cargar CSV
+  </button>
+  <input type="file" id="csv-input" accept=".csv">
+  <div id="stats">Mostrando <b id="count">0</b> reportes</div>
+</div>
+
+<div id="geo-bar-wrap">
+  <span id="geo-label">Geocodificando...</span>
+  <div class="geo-track"><div class="geo-fill" id="geo-fill"></div></div>
+  <span id="geo-count"></span>
+</div>
+
+<div id="main">
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-inner">
+
+      <div class="sec">
+        <div class="sec-title">Problemática</div>
+        <div id="cat-list"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Nivel de seguridad</div>
+        <div id="seg-list"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Fecha desde</div>
+        <input type="date" id="date-input" class="field" value="2020-01-01">
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Ir a código postal</div>
+        <div class="cp-row">
+          <input type="text" id="cp-input" class="field" placeholder="Ej. 06600" maxlength="10">
+          <button id="cp-btn" class="go-btn">Ir</button>
+        </div>
+        <div id="cp-msg"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="sb-toggle" title="Mostrar / ocultar panel">‹</div>
+
+    <!-- LEYENDA -->
+    <div id="legend">
+      <div id="leg-head">
+        <span id="leg-title">Leyenda</span>
+        <span id="leg-arrow">▾</span>
+      </div>
+      <div id="leg-body">
+        <div id="leg-items"></div>
+        <div class="leg-stats">
+          <div class="leg-stat"><span>Visibles</span><span id="ls-vis">0</span></div>
+          <div class="leg-stat"><span>Problemáticas</span><span id="ls-cats">0</span></div>
+          <div class="leg-stat"><span>Sin coords</span><span id="ls-geo">0</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="drop-ov"><div class="drop-box">📂 Suelta tu CSV aquí<p>Exporta desde Notion y suelta el archivo</p></div></div>
+
+<script>
+// ══════════════════════════════════════════════
+// MAPEO DE COLUMNAS — ajustado a reportes.csv
+// ══════════════════════════════════════════════
+const COLS = {
+  id:           ['id_reporte'],
+  fecha:        ['fecha_reporte', 'fecha'],
+  pais:         ['pais', 'país'],
+  estado:       ['estado'],
+  ciudad:       ['ciudad'],
+  colonia:      ['colonia'],
+  cp:           ['codigo_postal', 'cp', 'código postal'],
+  descripcion:  ['descripcion_problematica', 'descripcion', 'descripción'],
+  categoria:    ['problematica_principal', 'problematica', 'categoría', 'categoria'],
+  motivo:       ['motivo_inseguridad'],
+  seguridad:    ['nivel_seguridad_percibida'],
+  hora:         ['hora_incidente'],
+  frecuencia:   ['frecuencia_incidente'],
+  genero:       ['genero', 'género'],
+  movilidad:    ['medio_movilidad'],
+  alumbrado:    ['existe_alumbrado', 'calidad_alumbrado'],
+  superficie:   ['tipo_superficie'],
+  pavimento:    ['estado_pavimento'],
+  lat:          ['latitud', 'lat', 'latitude'],
+  lng:          ['longitud', 'lng', 'lon', 'longitude'],
+  direccion:    ['direccion', 'dirección', 'address'],
+};
+
+// ══════════════════════════════════════════════
+// PALETA — estilo Notion
+// ══════════════════════════════════════════════
+const CAT_COLORS = {
+  'Zona peatonal riesgosa': { color:'#F4A261', bg:'#F4A26118', icon:'🚶' },
+  'Alumbrado deficiente':   { color:'#FFD166', bg:'#FFD16618', icon:'💡' },
+  'Terreno baldío':         { color:'#6BCB77', bg:'#6BCB7718', icon:'🌿' },
+  'Vandalismo':             { color:'#EF476F', bg:'#EF476F18', icon:'🖌️' },
+  'Transporte inseguro':    { color:'#4CC9F0', bg:'#4CC9F018', icon:'🚌' },
+  'Acumulación de basura':  { color:'#A8DADC', bg:'#A8DADC18', icon:'🗑️' },
+  'Otro':                   { color:'#9b59f5', bg:'#9b59f518', icon:'📍' },
+};
+const FALLBACK_COLORS = [
+  { color:'#F4A261', bg:'#F4A26118', icon:'📌' },
+  { color:'#FFD166', bg:'#FFD16618', icon:'📌' },
+  { color:'#6BCB77', bg:'#6BCB7718', icon:'📌' },
+  { color:'#EF476F', bg:'#EF476F18', icon:'📌' },
+  { color:'#4CC9F0', bg:'#4CC9F018', icon:'📌' },
+  { color:'#A8DADC', bg:'#A8DADC18', icon:'📌' },
+  { color:'#9b59f5', bg:'#9b59f518', icon:'📌' },
+  { color:'#F4A261', bg:'#F4A26118', icon:'📌' },
+];
+
+const SEG_COLORS = {
+  '1': '#EF476F', '2': '#F4A261', '3': '#FFD166',
+  '4': '#6BCB77', '5': '#4CC9F0',
+  'Muy baja': '#EF476F', 'Baja': '#F4A261', 'Media': '#FFD166',
+  'Alta': '#6BCB77', 'Muy alta': '#4CC9F0',
+};
+
+let CAT_CONFIG = {};
+let EVENTOS = [];
+let activeCategories = new Set();
+let activeSeguridad = new Set(['all']);
+let dateFrom = new Date('2020-01-01');
+let markers = [];
+
+// ══════════════════════════════════════════════
+// MAPA
+// ══════════════════════════════════════════════
+const map = L.map('map', { center:[19.42,-99.13], zoom:11 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution:'© OpenStreetMap contributors', maxZoom:19
+}).addTo(map);
+
+// ══════════════════════════════════════════════
+// SETUP CATEGORÍAS
+// ══════════════════════════════════════════════
+function setupCats(eventos) {
+  const cats = [...new Set(eventos.map(e => e.categoria).filter(Boolean))];
+  CAT_CONFIG = {};
+  cats.forEach((c, i) => {
+    CAT_CONFIG[c] = CAT_COLORS[c] || FALLBACK_COLORS[i % FALLBACK_COLORS.length];
+  });
+  activeCategories = new Set(cats);
+  renderCatList();
+  renderLegend();
+}
+
+function getCfg(cat) { return CAT_CONFIG[cat] || { color:'#9b59f5', bg:'#9b59f518', icon:'📍' }; }
+
+function renderCatList() {
+  const el = document.getElementById('cat-list');
+  el.innerHTML = '';
+  // Todos
+  const allRow = mkEl('div', 'cat-row', { id:'row-all' });
+  allRow.innerHTML = `<div class="cat-dot" style="background:#555;border-radius:3px;"></div><span class="cat-name" style="color:#888;">Todos</span>`;
+  allRow.addEventListener('click', clickAll);
+  el.appendChild(allRow);
+  // Por categoría
+  Object.keys(CAT_CONFIG).forEach(cat => {
+    const cfg = getCfg(cat);
+    const row = mkEl('div', 'cat-row');
+    row.dataset.cat = cat;
+    row.innerHTML = `<div class="cat-dot" style="background:${cfg.color};"></div><span class="cat-name">${cfg.icon} ${cat}</span><span class="cat-n" data-cn="${cat}">0</span>`;
+    row.addEventListener('click', () => clickCat(cat));
+    el.appendChild(row);
+  });
+  syncCatStyles();
+}
+
+function renderSegList() {
+  const el = document.getElementById('seg-list');
+  const segs = [...new Set(EVENTOS.map(e => e.seguridad).filter(Boolean))].sort();
+  if (!segs.length) { el.innerHTML = '<div style="font-size:11px;color:#555;">Sin datos</div>'; return; }
+  el.innerHTML = '';
+  const allRow = mkEl('div', 'cat-row');
+  allRow.innerHTML = `<div class="cat-dot" style="background:#555;"></div><span class="cat-name" style="color:#888;">Todos los niveles</span>`;
+  allRow.addEventListener('click', () => { activeSeguridad = new Set(['all']); syncSegStyles(); renderMarkers(); });
+  el.appendChild(allRow);
+  segs.forEach(s => {
+    const color = SEG_COLORS[s] || '#9b59f5';
+    const row = mkEl('div', 'cat-row');
+    row.dataset.seg = s;
+    row.innerHTML = `<div class="cat-dot" style="background:${color};"></div><span class="cat-name">${s}</span>`;
+    row.addEventListener('click', () => {
+      if (activeSeguridad.has('all')) { activeSeguridad = new Set([s]); }
+      else if (activeSeguridad.has(s)) { activeSeguridad.delete(s); if (!activeSeguridad.size) activeSeguridad.add('all'); }
+      else { activeSeguridad.add(s); }
+      syncSegStyles();
+      renderMarkers();
+    });
+    el.appendChild(row);
+  });
+  syncSegStyles();
+}
+
+function clickAll() {
+  const allOn = activeCategories.size === Object.keys(CAT_CONFIG).length;
+  if (allOn) activeCategories.clear(); else activeCategories = new Set(Object.keys(CAT_CONFIG));
+  syncCatStyles(); renderMarkers();
+}
+function clickCat(cat) {
+  if (activeCategories.has(cat)) activeCategories.delete(cat); else activeCategories.add(cat);
+  syncCatStyles(); renderMarkers();
+}
+function syncCatStyles() {
+  document.querySelectorAll('#cat-list .cat-row[data-cat]').forEach(r => {
+    r.classList.toggle('off', !activeCategories.has(r.dataset.cat));
+  });
+}
+function syncSegStyles() {
+  document.querySelectorAll('#seg-list .cat-row[data-seg]').forEach(r => {
+    const active = activeSeguridad.has('all') || activeSeguridad.has(r.dataset.seg);
+    r.classList.toggle('off', !active);
+  });
+}
+function updateCatCounts() {
+  const counts = {};
+  markers.forEach(m => { counts[m._cat] = (counts[m._cat]||0)+1; });
+  document.querySelectorAll('[data-cn]').forEach(el => { el.textContent = counts[el.dataset.cn]||0; });
+}
+
+// ══════════════════════════════════════════════
+// LEYENDA
+// ══════════════════════════════════════════════
+function renderLegend() {
+  const el = document.getElementById('leg-items');
+  el.innerHTML = '';
+  Object.keys(CAT_CONFIG).forEach(cat => {
+    const cfg = getCfg(cat);
+    const row = mkEl('div', 'leg-row');
+    row.innerHTML = `<div class="leg-dot" style="background:${cfg.color};"></div><span class="leg-cat">${cat}</span><span class="leg-n" data-ln="${cat}">0</span>`;
+    el.appendChild(row);
+  });
+}
+function updateLegend() {
+  const counts = {};
+  markers.forEach(m => { counts[m._cat] = (counts[m._cat]||0)+1; });
+  document.querySelectorAll('[data-ln]').forEach(el => { el.textContent = counts[el.dataset.ln]||0; });
+  document.getElementById('ls-vis').textContent = markers.length;
+  document.getElementById('ls-cats').textContent = new Set(markers.map(m=>m._cat)).size;
+  document.getElementById('ls-geo').textContent = EVENTOS.filter(e=>!e.lat||!e.lng).length;
+}
+document.getElementById('leg-head').addEventListener('click', () => {
+  document.getElementById('legend').classList.toggle('open');
+});
+
+// ══════════════════════════════════════════════
+// MARCADORES
+// ══════════════════════════════════════════════
+function makeIcon(cat) {
+  const cfg = getCfg(cat);
+  return L.divIcon({
+    html:`<div class="mpin" style="background:${cfg.bg};border-color:${cfg.color};">${cfg.icon}</div>`,
+    className:'', iconSize:[26,26], iconAnchor:[13,13], popupAnchor:[0,-16]
+  });
+}
+
+function segColor(val) { return SEG_COLORS[val] || '#9b59f5'; }
+function segPct(val) {
+  const map5 = {'1':20,'Muy baja':20,'2':40,'Baja':40,'3':60,'Media':60,'4':80,'Alta':80,'5':100,'Muy alta':100};
+  return map5[val] || 0;
+}
+
+function makePopup(ev) {
+  const cfg = getCfg(ev.categoria);
+  let fecha = ev.fecha || '';
+  try { fecha = new Date(ev.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(e){}
+  const lugar = [ev.colonia, ev.ciudad, ev.estado].filter(Boolean).join(', ');
+  const segVal = ev.seguridad;
+  const segHTML = segVal ? `
+    <div class="hcard-seg">
+      <div class="seg-label">Nivel de seguridad percibida: <b style="color:${segColor(segVal)}">${segVal}</b></div>
+      <div class="seg-bar-track"><div class="seg-bar-fill" style="width:${segPct(segVal)}%;background:${segColor(segVal)};"></div></div>
+    </div>` : '';
+  return `<div class="hcard">
+    <div class="hcard-img" style="background:${cfg.bg};">${cfg.icon} <span style="font-size:13px;color:${cfg.color};font-weight:600;">${ev.categoria||''}</span></div>
+    <div class="hcard-body">
+      <div class="hcard-id">${ev.id||''}</div>
+      <div class="hcard-badge" style="background:${cfg.bg};color:${cfg.color};">${ev.categoria||'Sin categoría'}</div>
+      <div class="hcard-title">${ev.descripcion||'Sin descripción'}</div>
+      <div class="hcard-rows">
+        ${fecha ? `<div class="hcard-row">📅 <b>${fecha}</b></div>` : ''}
+        ${lugar ? `<div class="hcard-row">📍 <b>${lugar}</b></div>` : ''}
+        ${ev.cp ? `<div class="hcard-row">📮 <b>CP ${ev.cp}</b></div>` : ''}
+        ${ev.motivo ? `<div class="hcard-row">⚠️ <b>${ev.motivo}</b></div>` : ''}
+        ${ev.hora ? `<div class="hcard-row">🕐 <b>${ev.hora}</b></div>` : ''}
+        ${ev.movilidad ? `<div class="hcard-row">🚶 <b>${ev.movilidad}</b></div>` : ''}
+        ${ev.alumbrado ? `<div class="hcard-row">💡 <b>${ev.alumbrado}</b></div>` : ''}
+      </div>
+      ${segHTML}
+    </div>
+  </div>`;
+}
+
+function renderMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  EVENTOS.forEach(ev => {
+    if (!ev.lat || !ev.lng) return;
+    if (!activeCategories.has(ev.categoria)) return;
+    if (!activeSeguridad.has('all') && !activeSeguridad.has(ev.seguridad)) return;
+    try { if (new Date(ev.fecha) < dateFrom) return; } catch(e) {}
+    const m = L.marker([ev.lat, ev.lng], { icon: makeIcon(ev.categoria) })
+      .bindPopup(makePopup(ev), { maxWidth:280, minWidth:260, className:'' });
+    m._cat = ev.categoria;
+    m.addTo(map);
+    markers.push(m);
+  });
+  document.getElementById('count').textContent = markers.length;
+  updateCatCounts();
+  updateLegend();
+}
+
+// ══════════════════════════════════════════════
+// SIDEBAR TOGGLE
+// ══════════════════════════════════════════════
+const sbEl = document.getElementById('sidebar');
+const sbBtn = document.getElementById('sb-toggle');
+let sbOpen = true;
+sbBtn.addEventListener('click', () => {
+  sbOpen = !sbOpen;
+  sbEl.classList.toggle('hide', !sbOpen);
+  sbBtn.textContent = sbOpen ? '‹' : '›';
+  setTimeout(() => map.invalidateSize(), 270);
+});
+
+// ══════════════════════════════════════════════
+// FECHA
+// ══════════════════════════════════════════════
+document.getElementById('date-input').addEventListener('change', e => {
+  dateFrom = new Date(e.target.value);
+  renderMarkers();
+});
+
+// ══════════════════════════════════════════════
+// BÚSQUEDA CP
+// ══════════════════════════════════════════════
+async function goCP(cp) {
+  if (!cp) return;
+  const msg = document.getElementById('cp-msg');
+  msg.textContent = 'Buscando...';
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(cp)}&country=Mexico&format=json&limit=1`,{headers:{'Accept-Language':'es'}});
+    const d = await r.json();
+    if (d.length) { map.flyTo([+d[0].lat,+d[0].lon], 14, {duration:1.2}); msg.textContent='✓ Encontrado'; }
+    else msg.textContent = '✗ No encontrado';
+  } catch(e) { msg.textContent='Error de red'; }
+  setTimeout(() => msg.textContent='', 2800);
+}
+document.getElementById('cp-btn').addEventListener('click', () => goCP(document.getElementById('cp-input').value.trim()));
+document.getElementById('cp-input').addEventListener('keydown', e => { if(e.key==='Enter') goCP(e.target.value.trim()); });
+
+// ══════════════════════════════════════════════
+// CSV PARSER — columnas de reportes.csv
+// ══════════════════════════════════════════════
+function col(heads, ...names) {
+  for (const n of names) { const i = heads.indexOf(n.toLowerCase()); if (i>=0) return i; }
+  return -1;
+}
+
+function parseCSV(text) {
+  const rows = text.trim().split('\n');
+  if (rows.length < 2) return [];
+  const sep = rows[0].includes(';') ? ';' : ',';
+  const heads = rows[0].split(sep).map(h => h.trim().replace(/^"|"$/g,'').toLowerCase());
+
+  const iId   = col(heads, ...COLS.id);
+  const iFec  = col(heads, ...COLS.fecha);
+  const iPais = col(heads, ...COLS.pais);
+  const iEst  = col(heads, ...COLS.estado);
+  const iCiu  = col(heads, ...COLS.ciudad);
+  const iCol  = col(heads, ...COLS.colonia);
+  const iCP   = col(heads, ...COLS.cp);
+  const iDesc = col(heads, ...COLS.descripcion);
+  const iCat  = col(heads, ...COLS.categoria);
+  const iMot  = col(heads, ...COLS.motivo);
+  const iSeg  = col(heads, ...COLS.seguridad);
+  const iHor  = col(heads, ...COLS.hora);
+  const iMov  = col(heads, ...COLS.movilidad);
+  const iAlum = col(heads, 'calidad_alumbrado', 'existe_alumbrado');
+  const iLat  = col(heads, ...COLS.lat);
+  const iLng  = col(heads, ...COLS.lng);
+  const iDir  = col(heads, ...COLS.direccion);
+
+  return rows.slice(1).map(row => {
+    const c = splitRow(row, sep);
+    const g = i => (i>=0 && c[i]) ? c[i].trim().replace(/^"|"$/g,'') : '';
+    const la = parseFloat(g(iLat)), ln = parseFloat(g(iLng));
+    return {
+      id: g(iId), fecha: g(iFec), pais: g(iPais),
+      estado: g(iEst), ciudad: g(iCiu), colonia: g(iCol),
+      cp: g(iCP), descripcion: g(iDesc),
+      categoria: g(iCat) || 'Otro',
+      motivo: g(iMot), seguridad: g(iSeg), hora: g(iHor),
+      movilidad: g(iMov), alumbrado: g(iAlum),
+      lat: isNaN(la) ? null : la,
+      lng: isNaN(ln) ? null : ln,
+      direccion: g(iDir),
+    };
+  }).filter(e => e.id || e.descripcion || e.lat);
+}
+
+function splitRow(row, sep) {
+  const r=[]; let cur='', q=false;
+  for (const ch of row) { if(ch==='"'){q=!q;} else if(ch===sep&&!q){r.push(cur);cur='';} else cur+=ch; }
+  r.push(cur); return r;
+}
+
+// ══════════════════════════════════════════════
+// GEOCODING
+// ══════════════════════════════════════════════
+async function geocode(eventos) {
+  const sin = eventos.filter(e => !e.lat || !e.lng);
+  if (!sin.length) return;
+  const wrap = document.getElementById('geo-bar-wrap');
+  wrap.classList.add('show');
+  for (let i=0; i<sin.length; i++) {
+    const ev = sin[i];
+    document.getElementById('geo-fill').style.width = Math.round(i/sin.length*100)+'%';
+    document.getElementById('geo-count').textContent = `${i+1}/${sin.length}`;
+    document.getElementById('geo-label').textContent = `Geocodificando ${ev.id||ev.descripcion?.substring(0,20)||''}...`;
+    const q = [ev.direccion, ev.colonia, ev.cp, ev.ciudad, 'México'].filter(Boolean).join(', ');
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=mx`,{headers:{'Accept-Language':'es'}});
+      const d = await r.json();
+      if (d.length) { ev.lat=+d[0].lat; ev.lng=+d[0].lon; }
+    } catch(e) {}
+    await new Promise(r=>setTimeout(r,1100));
+  }
+  document.getElementById('geo-fill').style.width='100%';
+  document.getElementById('geo-label').textContent='Geocodificación completa ✓';
+  setTimeout(()=>wrap.classList.remove('show'),2000);
+  renderMarkers();
+  toast(`✓ ${sin.length} puntos geocodificados`);
+}
+
+// ══════════════════════════════════════════════
+// CARGA CSV
+// ══════════════════════════════════════════════
+function loadCSV(file) {
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const evs = parseCSV(e.target.result);
+    if (!evs.length) { toast('No se encontraron datos válidos'); return; }
+    EVENTOS = evs;
+    setupCats(EVENTOS);
+    renderSegList();
+    renderMarkers();
+    toast(`✓ ${evs.length} reportes cargados`);
+    await geocode(EVENTOS);
+    const withCoords = EVENTOS.filter(e=>e.lat&&e.lng);
+    if (withCoords.length) map.fitBounds(L.latLngBounds(withCoords.map(e=>[e.lat,e.lng])),{padding:[40,40]});
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
+document.getElementById('csv-btn').addEventListener('click', ()=>document.getElementById('csv-input').click());
+document.getElementById('csv-input').addEventListener('change', e=>{ if(e.target.files[0]) loadCSV(e.target.files[0]); });
+document.addEventListener('dragover', e=>{e.preventDefault(); document.getElementById('drop-ov').classList.add('show');});
+document.addEventListener('dragleave', e=>{if(!e.relatedTarget) document.getElementById('drop-ov').classList.remove('show');});
+document.addEventListener('drop', e=>{
+  e.preventDefault(); document.getElementById('drop-ov').classList.remove('show');
+  const f=e.dataTransfer.files[0];
+  if(f&&f.name.endsWith('.csv')) loadCSV(f); else toast('Suelta un archivo .csv');
+});
+
+// ══════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════
+function mkEl(tag, cls, attrs={}) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  Object.entries(attrs).forEach(([k,v]) => el[k]=v);
+  return el;
+}
+function toast(msg, ms=2800) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),ms);
+}
+
+// ══════════════════════════════════════════════
+// INIT — carga el CSV de ejemplo embebido
+// ══════════════════════════════════════════════
+const CSV_EJEMPLO = `id_reporte,fecha_reporte,pais,estado,ciudad,colonia,codigo_postal,descripcion_problematica,problematica_principal,motivo_inseguridad,nivel_seguridad_percibida,hora_incidente,medio_movilidad,latitud,longitud,direccion
+REPORT-6,2026-04-28T01:55:00.000Z,,,,, 7910,,Terreno baldío,,,,,,,
+REPORT-5,2026-04-28T01:50:00.000Z,México,CDMX,CDMX,Aragón,7910,Hay baches en las calles y carreteras,Zona peatonal riesgosa,Las calles están invadidas,Baja,,,19.46567,-99.08041,"Avenida José Loreto Fabela, Aragón, CDMX"
+REPORT-4,2026-04-28T01:23:00.000Z,México,CDMX,CDMX,Tláhuac,13400,Hay un terreno abandonado con hierbas pero enrejado y no hay luz,Terreno baldío,Falta de iluminación,Media,23:00,A pie,19.29617,-99.01387,"Isabel la Católica 15, Tláhuac"
+REPORT-3,2026-04-28T01:20:00.000Z,México,CDMX,CDMX,Tlaltenco,13400,En la calle no hay luz suficiente,Alumbrado deficiente,Falta de alumbrado,Muy baja,22:30,A pie,19.29621,-99.01422,"Isabel la Católica, Tláhuac"`;
+
+(function init() {
+  const evs = parseCSV(CSV_EJEMPLO);
+  EVENTOS = evs;
+  setupCats(EVENTOS);
+  renderSegList();
+  document.getElementById('legend').classList.add('open');
+  renderMarkers();
+  const withCoords = EVENTOS.filter(e=>e.lat&&e.lng);
+  if (withCoords.length) map.fitBounds(L.latLngBounds(withCoords.map(e=>[e.lat,e.lng])),{padding:[60,60]});
+})();
+</script>
+</body>
+</html>

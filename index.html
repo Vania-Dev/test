@@ -1427,17 +1427,40 @@
             }
 
             // ══════════════════════════════════════════════
-            // INIT — carga el CSV de ejemplo embebido
+            // INIT — carga reportes.csv desde la raíz del proyecto
             // ══════════════════════════════════════════════
-            const CSV_EJEMPLO = `id_reporte,fecha_reporte,pais,estado,ciudad,colonia,codigo_postal,descripcion_problematica,problematica_principal,motivo_inseguridad,nivel_seguridad_percibida,hora_incidente,medio_movilidad,latitud,longitud,direccion
+            const CSV_FALLBACK = `id_reporte,fecha_reporte,pais,estado,ciudad,colonia,codigo_postal,descripcion_problematica,problematica_principal,motivo_inseguridad,nivel_seguridad_percibida,hora_incidente,medio_movilidad,latitud,longitud,direccion
             REPORT-6,2026-04-28T01:55:00.000Z,,,,, 7910,,Terreno baldío,,,,,,,
             REPORT-5,2026-04-28T01:50:00.000Z,México,CDMX,CDMX,Aragón,7910,Hay baches en las calles y carreteras,Zona peatonal riesgosa,Las calles están invadidas,Baja,,,19.46567,-99.08041,"Avenida José Loreto Fabela, Aragón, CDMX"
             REPORT-4,2026-04-28T01:23:00.000Z,México,CDMX,CDMX,Tláhuac,13400,Hay un terreno abandonado con hierbas pero enrejado y no hay luz,Terreno baldío,Falta de iluminación,Media,23:00,A pie,19.29617,-99.01387,"Isabel la Católica 15, Tláhuac"
             REPORT-3,2026-04-28T01:20:00.000Z,México,CDMX,CDMX,Tlaltenco,13400,En la calle no hay luz suficiente,Alumbrado deficiente,Falta de alumbrado,Muy baja,22:30,A pie,19.29621,-99.01422,"Isabel la Católica, Tláhuac"
             REPORT-7,2026-04-28T01:20:00.000Z,Costa Rica,San Jose,San Jose,Pueblo,10100,En la calle no hay luz suficiente,Alumbrado deficiente,Falta de alumbrado,Muy baja,22:30,A pie,9.932818763368076,-84.0709901694165,"Isabel la Católica, Tláhuac"`;
 
-            (function init() {
-                const evs = parseCSV(CSV_EJEMPLO);
+            async function cargarReportesIniciales() {
+                try {
+                    const resp = await fetch("reportes.csv", {
+                        cache: "no-store",
+                    });
+                    if (!resp.ok)
+                        throw new Error("No se encontró reportes.csv (" + resp.status + ")");
+                    const text = await resp.text();
+                    const evs = parseCSV(text);
+                    if (!evs.length)
+                        throw new Error("reportes.csv está vacío o mal formado");
+                    toast(`✓ ${evs.length} reportes cargados desde reportes.csv`);
+                    return evs;
+                } catch (err) {
+                    console.warn(
+                        "No se pudo cargar reportes.csv, usando datos de ejemplo:",
+                        err,
+                    );
+                    toast("⚠ No se encontró reportes.csv, mostrando datos de ejemplo");
+                    return parseCSV(CSV_FALLBACK);
+                }
+            }
+
+            (async function init() {
+                const evs = await cargarReportesIniciales();
                 EVENTOS = evs;
                 setupCats(EVENTOS);
                 renderSegList();
@@ -1455,6 +1478,16 @@
                 } else {
                     // Set a default view if no coordinates are found initially
                     map.setView([19.42, -99.13], 11);
+                }
+
+                // Geocodificar automáticamente los reportes que no tengan coordenadas
+                await geocode(EVENTOS);
+                const withCoords2 = EVENTOS.filter((e) => e.lat && e.lng);
+                if (withCoords2.length) {
+                    map.fitBounds(
+                        L.latLngBounds(withCoords2.map((e) => [e.lat, e.lng])),
+                        { padding: [60, 60] },
+                    );
                 }
 
                 // Listener del dropdown de país — aquí el DOM ya existe
